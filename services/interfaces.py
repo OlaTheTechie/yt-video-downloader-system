@@ -163,3 +163,32 @@ class SubtitleHandlerInterface(ABC):
                                  preferred_languages: List[str]) -> List[SubtitleInfo]:
         """Filter subtitles by preferred languages."""
         pass
+
+
+class ArchiveManagerInterface(ABC):
+    """Interface for archive management and duplicate detection operations."""
+    
+    @abstractmethod
+    def is_downloaded(self, video_id: str) -> bool:
+        """Check if a video has already been downloaded."""
+        pass
+    
+    @abstractmethod
+    def add_download_record(self, video_metadata: VideoMetadata, download_result: DownloadResult) -> None:
+        """Add a download record to the archive."""
+        pass
+    
+    @abstractmethod
+    def get_download_record(self, video_id: str) -> Optional[Dict[str, Any]]:
+        """Get download record for a video."""
+        pass
+    
+    @abstractmethod
+    def find_duplicates_by_content(self) -> List[List[Dict[str, Any]]]:
+        """Find potential duplicate downloads based on content hash."""
+        pass
+    
+    @abstractmethod
+    def cleanup_missing_files(self) -> List[str]:
+        """Remove archive records for files that no longer exist."""
+        pass

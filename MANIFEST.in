@@ -1,0 +1,32 @@
+# Include additional files in the distribution package
+
+# Documentation
+include README.md
+include LICENSE
+include CHANGELOG.md
+
+# Configuration files
+include requirements.txt
+include requirements-dev.txt
+include pyproject.toml
+
+# Package data
+recursive-include config *.json *.yaml *.yml
+recursive-include cli *.py
+recursive-include core *.py
+recursive-include models *.py
+recursive-include services *.py
+
+# Exclude development and build files
+exclude .gitignore
+exclude .pre-commit-config.yaml
+recursive-exclude * __pycache__
+recursive-exclude * *.py[co]
+recursive-exclude * *.so
+recursive-exclude * .DS_Store
+recursive-exclude tests *
+recursive-exclude .pytest_cache *
+recursive-exclude .venv *
+recursive-exclude build *
+recursive-exclude dist *
+recursive-exclude *.egg-info *

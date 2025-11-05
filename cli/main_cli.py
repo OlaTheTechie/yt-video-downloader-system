@@ -11,7 +11,7 @@ import logging
 
 from models.core import DownloadConfig, ProgressInfo
 from config import ConfigManager, setup_logging, get_logger
-from config.error_handling import ConfigurationError, ValidationError
+from config.error_handling import ConfigurationError, ValidationError, YouTubeDownloaderError
 from cli.interfaces import CLIInterface
 
 
@@ -75,7 +75,61 @@ cli_app = YouTubeDownloaderCLI()
               help='Path to log file')
 @click.pass_context
 def main(ctx, config, log_level, log_file):
-    """YouTube Video Downloader - Download videos with advanced features."""
+    """
+    YouTube Video Downloader - Download videos with advanced features.
+    
+    A production-ready command-line application for downloading YouTube videos
+    with advanced features including timestamp-based video splitting, playlist
+    support, and parallel downloads.
+    
+    \b
+    EXAMPLES:
+    
+    Download a single video:
+        youtube-downloader download "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+    
+    Download with specific quality and format:
+        youtube-downloader download "https://youtu.be/dQw4w9WgXcQ" -q 720p -f mp4
+    
+    Download with timestamp splitting:
+        youtube-downloader download "https://youtu.be/dQw4w9WgXcQ" --split-timestamps
+    
+    Download entire playlist:
+        youtube-downloader playlist "https://www.youtube.com/playlist?list=PLrAXtmRdnEQy6nuLMHjMZOz59Oq8HmPME"
+    
+    Download from batch file:
+        youtube-downloader batch urls.txt
+    
+    Interactive mode with splitting decisions:
+        youtube-downloader download "https://youtu.be/dQw4w9WgXcQ" --interactive
+    
+    \b
+    CONFIGURATION:
+    
+    Generate default configuration file:
+        youtube-downloader init-config
+    
+    Use custom configuration:
+        youtube-downloader --config my-config.json download "https://youtu.be/dQw4w9WgXcQ"
+    
+    Validate configuration:
+        youtube-downloader validate-config
+    
+    \b
+    ARCHIVE MANAGEMENT:
+    
+    View archive statistics:
+        youtube-downloader archive --action stats
+    
+    Find duplicate downloads:
+        youtube-downloader archive --action duplicates
+    
+    Clean up missing files:
+        youtube-downloader archive --action cleanup
+    
+    For more information on each command, use:
+        youtube-downloader COMMAND --help
+    """
     # Ensure context object exists
     ctx.ensure_object(dict)
     
@@ -100,6 +154,15 @@ def main(ctx, config, log_level, log_file):
     # If no command is specified, show help
     if ctx.invoked_subcommand is None:
         click.echo(ctx.get_help())
+        click.echo("\n" + "="*60)
+        click.echo("QUICK START:")
+        click.echo("  1. Download a single video:")
+        click.echo('     youtube-downloader download "https://www.youtube.com/watch?v=VIDEO_ID"')
+        click.echo("  2. Download a playlist:")
+        click.echo('     youtube-downloader playlist "https://www.youtube.com/playlist?list=PLAYLIST_ID"')
+        click.echo("  3. Create configuration file:")
+        click.echo("     youtube-downloader init-config")
+        click.echo("="*60)
 
 
 @main.command()
@@ -143,35 +206,114 @@ def main(ctx, config, log_level, log_file):
 @click.option('--container',
               type=click.Choice(['mp4', 'webm', 'mkv']),
               help='Preferred container format')
+@click.option('--subtitles/--no-subtitles',
+              default=None,
+              help='Download video subtitles')
+@click.option('--subtitle-languages',
+              default=None,
+              help='Comma-separated list of subtitle languages (e.g., en,es,fr)')
+@click.option('--subtitle-format',
+              type=click.Choice(['srt', 'vtt', 'ass', 'ttml']),
+              help='Subtitle format preference')
+@click.option('--auto-subs/--no-auto-subs',
+              default=None,
+              help='Include auto-generated subtitles')
+@click.option('--archive/--no-archive',
+              default=None,
+              help='Use download archive to track downloads')
+@click.option('--skip-duplicates/--no-skip-duplicates',
+              default=None,
+              help='Skip videos that are already in the archive')
+@click.option('--interactive/--no-interactive',
+              default=False,
+              help='Enable interactive mode for timestamp splitting decisions')
 @click.pass_context
-def download(ctx, url, **kwargs):
-    """Download a single YouTube video."""
+def download(ctx, url, interactive, **kwargs):
+    """
+    Download a single YouTube video.
+    
+    \b
+    EXAMPLES:
+    
+    Basic download:
+        youtube-downloader download "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+    
+    Download with specific quality and format:
+        youtube-downloader download "https://youtu.be/dQw4w9WgXcQ" -q 720p -f mp4
+    
+    Download with timestamp splitting:
+        youtube-downloader download "https://youtu.be/dQw4w9WgXcQ" --split-timestamps
+    
+    Interactive mode (prompts for splitting):
+        youtube-downloader download "https://youtu.be/dQw4w9WgXcQ" --interactive
+    
+    Download with subtitles:
+        youtube-downloader download "https://youtu.be/dQw4w9WgXcQ" --subtitles --subtitle-languages en,es
+    
+    Audio-only download:
+        youtube-downloader download "https://youtu.be/dQw4w9WgXcQ" --audio-format mp3
+    """
     try:
+        # Import application controller
+        from core.application import YouTubeDownloaderApp
+        
         # Get base configuration
         base_config = ctx.obj['config']
         
-        # Filter out None values from CLI arguments
-        cli_args = {k: v for k, v in kwargs.items() if v is not None}
+        # Process CLI arguments
+        cli_args = _process_cli_args(kwargs)
         
-        # Merge CLI arguments with configuration
-        final_config = cli_app.config_manager.merge_cli_args(base_config, cli_args)
+        # Initialize application
+        app = YouTubeDownloaderApp()
+        
+        # Load and merge configuration
+        final_config = app.load_configuration(cli_args=cli_args)
+        if base_config:
+            # Merge with base config from context
+            final_config = app.config_manager.merge_cli_args(base_config, cli_args)
         
         # Validate URL
         if not _is_valid_youtube_url(url):
             cli_app.display_error("Invalid YouTube URL provided")
             sys.exit(1)
         
-        cli_app.display_success(f"Configuration loaded successfully")
+        # Set up progress callback
+        def progress_callback(progress: ProgressInfo):
+            cli_app.display_progress(progress)
+        
+        app.set_progress_callback(progress_callback)
+        
+        cli_app.display_success("Starting single video download...")
         click.echo(f"URL: {url}")
         click.echo(f"Output directory: {final_config.output_directory}")
         click.echo(f"Quality: {final_config.quality}")
         click.echo(f"Format: {final_config.format_preference}")
         
-        # TODO: Implement actual download logic in future tasks
-        click.echo("Download functionality will be implemented in future tasks.")
+        # Perform download
+        result = app.download_single_video(url, final_config, interactive=interactive)
+        
+        # Display results
+        if result.success:
+            cli_app.display_success(f"Download completed successfully!")
+            click.echo(f"Video saved to: {result.video_path}")
+            
+            if result.split_files:
+                click.echo(f"Video split into {len(result.split_files)} chapters")
+            
+            if result.metadata_path:
+                click.echo(f"Metadata saved to: {result.metadata_path}")
+            
+            if result.thumbnail_path:
+                click.echo(f"Thumbnail saved to: {result.thumbnail_path}")
+        else:
+            cli_app.display_error(f"Download failed: {result.error_message}")
+            sys.exit(1)
         
     except (ConfigurationError, ValidationError) as e:
         cli_app.display_error(f"Configuration error: {e.message}")
+        sys.exit(1)
+    except YouTubeDownloaderError as e:
+        cli_app.display_error(f"Download error: {e.message}")
         sys.exit(1)
     except Exception as e:
         cli_app.display_error(f"Unexpected error: {str(e)}")
@@ -201,34 +343,107 @@ def download(ctx, url, **kwargs):
 @click.option('--metadata/--no-metadata',
               default=None,
               help='Save video metadata')
+@click.option('--subtitles/--no-subtitles',
+              default=None,
+              help='Download video subtitles')
+@click.option('--subtitle-languages',
+              default=None,
+              help='Comma-separated list of subtitle languages (e.g., en,es,fr)')
+@click.option('--subtitle-format',
+              type=click.Choice(['srt', 'vtt', 'ass', 'ttml']),
+              help='Subtitle format preference')
+@click.option('--archive/--no-archive',
+              default=None,
+              help='Use download archive to track downloads')
+@click.option('--skip-duplicates/--no-skip-duplicates',
+              default=None,
+              help='Skip videos that are already in the archive')
+@click.option('--interactive/--no-interactive',
+              default=False,
+              help='Enable interactive mode for timestamp splitting decisions')
 @click.pass_context
-def playlist(ctx, playlist_url, **kwargs):
-    """Download an entire YouTube playlist."""
+def playlist(ctx, playlist_url, interactive, **kwargs):
+    """
+    Download an entire YouTube playlist.
+    
+    \b
+    EXAMPLES:
+    
+    Basic playlist download:
+        youtube-downloader playlist "https://www.youtube.com/playlist?list=PLrAXtmRdnEQy6nuLMHjMZOz59Oq8HmPME"
+    
+    Playlist with parallel downloads:
+        youtube-downloader playlist "https://www.youtube.com/playlist?list=PLAYLIST_ID" -p 3
+    
+    Playlist with timestamp splitting:
+        youtube-downloader playlist "https://www.youtube.com/playlist?list=PLAYLIST_ID" --split-timestamps
+    
+    Interactive playlist (per-video splitting decisions):
+        youtube-downloader playlist "https://www.youtube.com/playlist?list=PLAYLIST_ID" --interactive
+    """
     try:
+        # Import application controller
+        from core.application import YouTubeDownloaderApp
+        
         # Get base configuration
         base_config = ctx.obj['config']
         
-        # Filter out None values from CLI arguments
-        cli_args = {k: v for k, v in kwargs.items() if v is not None}
+        # Process CLI arguments
+        cli_args = _process_cli_args(kwargs)
         
-        # Merge CLI arguments with configuration
-        final_config = cli_app.config_manager.merge_cli_args(base_config, cli_args)
+        # Initialize application
+        app = YouTubeDownloaderApp()
+        
+        # Load and merge configuration
+        final_config = app.load_configuration(cli_args=cli_args)
+        if base_config:
+            # Merge with base config from context
+            final_config = app.config_manager.merge_cli_args(base_config, cli_args)
         
         # Validate playlist URL
         if not _is_valid_youtube_playlist_url(playlist_url):
             cli_app.display_error("Invalid YouTube playlist URL provided")
             sys.exit(1)
         
-        cli_app.display_success(f"Playlist download configuration loaded")
+        # Set up progress callback
+        def progress_callback(progress: ProgressInfo):
+            cli_app.display_progress(progress)
+        
+        app.set_progress_callback(progress_callback)
+        
+        cli_app.display_success("Starting playlist download...")
         click.echo(f"Playlist URL: {playlist_url}")
         click.echo(f"Output directory: {final_config.output_directory}")
         click.echo(f"Parallel downloads: {final_config.max_parallel_downloads}")
         
-        # TODO: Implement actual playlist download logic in future tasks
-        click.echo("Playlist download functionality will be implemented in future tasks.")
+        # Perform playlist download
+        results = app.download_playlist(playlist_url, final_config, interactive=interactive)
+        
+        # Display results summary
+        summary = app.get_workflow_summary(results)
+        
+        click.echo(f"\nPlaylist download completed!")
+        click.echo(f"Total downloads: {summary['total_downloads']}")
+        click.echo(f"Successful: {summary['successful_downloads']}")
+        click.echo(f"Failed: {summary['failed_downloads']}")
+        
+        if summary['videos_with_splits'] > 0:
+            click.echo(f"Videos split into chapters: {summary['videos_with_splits']}")
+            click.echo(f"Total split files created: {summary['total_split_files']}")
+        
+        if summary['successful_downloads'] > 0:
+            click.echo(f"Total download time: {summary['total_download_time']:.1f} seconds")
+            click.echo(f"Average time per download: {summary['average_download_time']:.1f} seconds")
+        
+        # Exit with error code if any downloads failed
+        if summary['failed_downloads'] > 0:
+            sys.exit(1)
         
     except (ConfigurationError, ValidationError) as e:
         cli_app.display_error(f"Configuration error: {e.message}")
+        sys.exit(1)
+    except YouTubeDownloaderError as e:
+        cli_app.display_error(f"Download error: {e.message}")
         sys.exit(1)
     except Exception as e:
         cli_app.display_error(f"Unexpected error: {str(e)}")
@@ -248,13 +463,41 @@ def playlist(ctx, playlist_url, **kwargs):
               help='Number of parallel downloads (1-10)')
 @click.pass_context
 def batch(ctx, batch_file, **kwargs):
-    """Download videos from a batch file containing URLs."""
+    """
+    Download videos from a batch file containing URLs.
+    
+    The batch file should contain one URL per line. Lines starting with # are
+    treated as comments and ignored. Empty lines are also ignored.
+    
+    \b
+    BATCH FILE FORMAT:
+    
+    # YouTube Video Downloader Batch File
+    # One URL per line, comments start with #
+    
+    https://www.youtube.com/watch?v=dQw4w9WgXcQ
+    https://youtu.be/another_video_id
+    https://www.youtube.com/playlist?list=PLAYLIST_ID
+    # https://youtu.be/commented_out_video
+    
+    \b
+    EXAMPLES:
+    
+    Basic batch download:
+        youtube-downloader batch urls.txt
+    
+    Batch with parallel processing:
+        youtube-downloader batch urls.txt -p 5
+    
+    Batch with specific quality:
+        youtube-downloader batch urls.txt -q 720p
+    """
     try:
         # Get base configuration
         base_config = ctx.obj['config']
         
-        # Filter out None values from CLI arguments
-        cli_args = {k: v for k, v in kwargs.items() if v is not None}
+        # Process CLI arguments
+        cli_args = _process_cli_args(kwargs)
         
         # Merge CLI arguments with configuration
         final_config = cli_app.config_manager.merge_cli_args(base_config, cli_args)
@@ -270,25 +513,25 @@ def batch(ctx, batch_file, **kwargs):
         click.echo(f"URLs found: {len(urls)}")
         click.echo(f"Output directory: {final_config.output_directory}")
         
-        # Import workflow manager
-        from services.workflow_manager import WorkflowManager
+        # Import application controller
+        from core.application import YouTubeDownloaderApp
         
-        # Initialize workflow manager
-        workflow_manager = WorkflowManager()
+        # Initialize application
+        app = YouTubeDownloaderApp()
         
         # Set up progress callback
         def progress_callback(progress: ProgressInfo):
             if progress.total_files > 1:
                 click.echo(f"Progress: {progress.files_completed}/{progress.total_files} files completed")
         
-        workflow_manager.download_manager.set_progress_callback(progress_callback)
+        app.set_progress_callback(progress_callback)
         
         # Start batch download
         click.echo(f"\nStarting batch download...")
-        results = workflow_manager.download_batch_from_file(str(batch_file), final_config, interactive=False)
+        results = app.download_batch_from_file(str(batch_file), final_config, interactive=False)
         
         # Display results summary
-        summary = workflow_manager.get_workflow_summary(results)
+        summary = app.get_workflow_summary(results)
         
         click.echo(f"\nBatch download completed!")
         click.echo(f"Total downloads: {summary['total_downloads']}")
@@ -326,6 +569,224 @@ def init_config(output):
     except ConfigurationError as e:
         cli_app.display_error(f"Failed to create configuration file: {e.message}")
         sys.exit(1)
+
+
+@main.command()
+@click.option('--archive-dir', '-d',
+              type=click.Path(path_type=Path),
+              default='./downloads',
+              help='Directory containing the download archive')
+@click.option('--action',
+              type=click.Choice(['stats', 'duplicates', 'cleanup', 'export']),
+              required=True,
+              help='Archive management action to perform')
+@click.option('--export-path',
+              type=click.Path(path_type=Path),
+              help='Path for archive export (required for export action)')
+@click.pass_context
+def archive(ctx, archive_dir, action, export_path):
+    """Manage download archive and detect duplicates."""
+    try:
+        from services.archive_manager import ArchiveManager
+        
+        archive_manager = ArchiveManager(str(archive_dir))
+        
+        if action == 'stats':
+            stats = archive_manager.get_archive_stats()
+            click.echo("Archive Statistics:")
+            click.echo(f"Total downloads: {stats.get('total_downloads', 0)}")
+            click.echo(f"Total size: {stats.get('total_size', 0) / (1024**3):.2f} GB")
+            
+            if 'first_download' in stats:
+                click.echo(f"First download: {stats['first_download']}")
+            if 'last_download' in stats:
+                click.echo(f"Last download: {stats['last_download']}")
+            
+            if 'total_duration_hours' in stats:
+                click.echo(f"Total duration: {stats['total_duration_hours']:.1f} hours")
+            
+            if 'top_uploaders' in stats:
+                click.echo("\nTop uploaders:")
+                for uploader, count in stats['top_uploaders'][:5]:
+                    click.echo(f"  {uploader}: {count} videos")
+        
+        elif action == 'duplicates':
+            content_duplicates = archive_manager.find_duplicates_by_content()
+            title_duplicates = archive_manager.find_duplicates_by_title()
+            
+            click.echo(f"Found {len(content_duplicates)} groups of content duplicates")
+            click.echo(f"Found {len(title_duplicates)} groups of title duplicates")
+            
+            if content_duplicates:
+                click.echo("\nContent duplicates:")
+                for i, group in enumerate(content_duplicates[:5], 1):
+                    click.echo(f"  Group {i}:")
+                    for record in group:
+                        click.echo(f"    - {record.get('title', 'Unknown')} ({record.get('video_id', 'Unknown')})")
+        
+        elif action == 'cleanup':
+            removed_ids = archive_manager.cleanup_missing_files()
+            click.echo(f"Cleaned up {len(removed_ids)} missing file records")
+            
+            if removed_ids:
+                click.echo("Removed records:")
+                for video_id in removed_ids[:10]:  # Show first 10
+                    click.echo(f"  - {video_id}")
+                if len(removed_ids) > 10:
+                    click.echo(f"  ... and {len(removed_ids) - 10} more")
+        
+        elif action == 'export':
+            if not export_path:
+                click.echo("Error: --export-path is required for export action")
+                sys.exit(1)
+            
+            archive_manager.export_archive(str(export_path))
+            click.echo(f"Archive exported to: {export_path}")
+        
+    except Exception as e:
+        click.echo(f"Error managing archive: {e}")
+        sys.exit(1)
+
+
+@main.command()
+def help_examples():
+    """Show comprehensive usage examples and tips."""
+    examples = """
+YouTube Video Downloader - Comprehensive Usage Examples
+
+═══════════════════════════════════════════════════════════════════════════════
+
+BASIC DOWNLOADS:
+
+  Single video download:
+    youtube-downloader download "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+
+  Download to specific directory:
+    youtube-downloader download "https://youtu.be/dQw4w9WgXcQ" -o ~/Downloads/Videos
+
+  Download specific quality:
+    youtube-downloader download "https://youtu.be/dQw4w9WgXcQ" -q 720p
+
+  Download audio only:
+    youtube-downloader download "https://youtu.be/dQw4w9WgXcQ" --audio-format mp3
+
+═══════════════════════════════════════════════════════════════════════════════
+
+ADVANCED FEATURES:
+
+  Download with timestamp splitting:
+    youtube-downloader download "https://youtu.be/dQw4w9WgXcQ" --split-timestamps
+
+  Interactive mode (prompts for splitting decisions):
+    youtube-downloader download "https://youtu.be/dQw4w9WgXcQ" --interactive
+
+  Download with subtitles:
+    youtube-downloader download "https://youtu.be/dQw4w9WgXcQ" --subtitles --subtitle-languages en,es
+
+  Download with metadata and thumbnails:
+    youtube-downloader download "https://youtu.be/dQw4w9WgXcQ" --metadata --thumbnails
+
+═══════════════════════════════════════════════════════════════════════════════
+
+PLAYLIST DOWNLOADS:
+
+  Download entire playlist:
+    youtube-downloader playlist "https://www.youtube.com/playlist?list=PLrAXtmRdnEQy6nuLMHjMZOz59Oq8HmPME"
+
+  Playlist with parallel downloads:
+    youtube-downloader playlist "https://www.youtube.com/playlist?list=PLAYLIST_ID" -p 3
+
+  Playlist with splitting options:
+    youtube-downloader playlist "https://www.youtube.com/playlist?list=PLAYLIST_ID" --split-timestamps
+
+═══════════════════════════════════════════════════════════════════════════════
+
+BATCH DOWNLOADS:
+
+  Create batch file (urls.txt):
+    # One URL per line, comments start with #
+    https://www.youtube.com/watch?v=dQw4w9WgXcQ
+    https://youtu.be/another_video_id
+    # https://youtu.be/commented_out_video
+
+  Download from batch file:
+    youtube-downloader batch urls.txt
+
+  Batch download with parallel processing:
+    youtube-downloader batch urls.txt -p 5
+
+═══════════════════════════════════════════════════════════════════════════════
+
+CONFIGURATION:
+
+  Generate default configuration:
+    youtube-downloader init-config
+
+  Generate config in specific location:
+    youtube-downloader init-config -o ~/my-config.json
+
+  Use custom configuration:
+    youtube-downloader --config ~/my-config.json download "https://youtu.be/dQw4w9WgXcQ"
+
+  Validate configuration:
+    youtube-downloader validate-config
+
+═══════════════════════════════════════════════════════════════════════════════
+
+ARCHIVE MANAGEMENT:
+
+  View download statistics:
+    youtube-downloader archive --action stats
+
+  Find duplicate downloads:
+    youtube-downloader archive --action duplicates
+
+  Clean up missing files from archive:
+    youtube-downloader archive --action cleanup
+
+  Export archive data:
+    youtube-downloader archive --action export --export-path archive-backup.json
+
+═══════════════════════════════════════════════════════════════════════════════
+
+QUALITY AND FORMAT OPTIONS:
+
+  Quality options: worst, best, 144p, 240p, 360p, 480p, 720p, 1080p, 1440p, 2160p
+  Video formats: mp4, webm, mkv
+  Audio formats: mp3, m4a, ogg, wav
+  Video codecs: h264, h265, vp9, av1
+  Audio codecs: aac, mp3, opus
+
+  Example with specific codec preferences:
+    youtube-downloader download "https://youtu.be/dQw4w9WgXcQ" --video-codec h264 --audio-codec aac
+
+═══════════════════════════════════════════════════════════════════════════════
+
+LOGGING AND DEBUGGING:
+
+  Enable debug logging:
+    youtube-downloader --log-level DEBUG download "https://youtu.be/dQw4w9WgXcQ"
+
+  Save logs to file:
+    youtube-downloader --log-file download.log download "https://youtu.be/dQw4w9WgXcQ"
+
+═══════════════════════════════════════════════════════════════════════════════
+
+TIPS:
+
+  • Use quotes around URLs to avoid shell interpretation issues
+  • The --interactive flag is useful for deciding splitting on a per-video basis
+  • Parallel downloads (-p) can speed up playlist/batch downloads significantly
+  • Use --archive to avoid re-downloading the same videos
+  • Configuration files allow you to set default preferences
+  • Check logs if downloads fail - they contain detailed error information
+
+For detailed help on any command, use:
+  youtube-downloader COMMAND --help
+
+═══════════════════════════════════════════════════════════════════════════════
+"""
+    click.echo(examples)
 
 
 @main.command()
@@ -382,6 +843,39 @@ def _is_valid_youtube_playlist_url(url: str) -> bool:
         True if valid YouTube playlist URL, False otherwise
     """
     return _is_valid_youtube_url(url) and ('playlist' in url.lower() or 'list=' in url.lower())
+
+
+def _process_cli_args(cli_args: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Process CLI arguments to handle Path objects and other conversions.
+    
+    Args:
+        cli_args: Raw CLI arguments
+        
+    Returns:
+        Processed CLI arguments
+    """
+    processed_args = {}
+    
+    for key, value in cli_args.items():
+        if value is None:
+            continue
+            
+        # Convert Path objects to strings
+        if key == 'output' and value is not None:
+            processed_args['output_directory'] = str(value)
+        elif isinstance(value, Path):
+            processed_args[key] = str(value)
+        else:
+            processed_args[key] = value
+    
+    # Process subtitle languages if provided
+    if 'subtitle_languages' in processed_args and processed_args['subtitle_languages']:
+        processed_args['subtitle_languages'] = [
+            lang.strip() for lang in processed_args['subtitle_languages'].split(',')
+        ]
+    
+    return processed_args
 
 
 def _read_batch_file(file_path: Path) -> List[str]:

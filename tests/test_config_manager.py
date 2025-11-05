@@ -174,7 +174,13 @@ class TestConfigManager:
             'save_thumbnails': True,
             'save_metadata': True,
             'resume_downloads': True,
-            'retry_attempts': 3
+            'retry_attempts': 3,
+            'download_subtitles': False,
+            'subtitle_languages': ['en'],
+            'subtitle_format': 'srt',
+            'auto_generated_subtitles': True,
+            'use_archive': True,
+            'skip_duplicates': True
         }
         
         # Should not raise any exception
@@ -205,7 +211,13 @@ class TestConfigManager:
             'save_thumbnails': True,
             'save_metadata': True,
             'resume_downloads': True,
-            'retry_attempts': 3
+            'retry_attempts': 3,
+            'download_subtitles': False,
+            'subtitle_languages': ['en'],
+            'subtitle_format': 'srt',
+            'auto_generated_subtitles': True,
+            'use_archive': True,
+            'skip_duplicates': True
         }
         
         with pytest.raises(ValidationError) as exc_info:
@@ -225,7 +237,13 @@ class TestConfigManager:
             'save_thumbnails': True,
             'save_metadata': True,
             'resume_downloads': True,
-            'retry_attempts': -1  # Invalid: must be non-negative
+            'retry_attempts': -1,  # Invalid: must be non-negative
+            'download_subtitles': False,
+            'subtitle_languages': ['en'],
+            'subtitle_format': 'srt',
+            'auto_generated_subtitles': True,
+            'use_archive': True,
+            'skip_duplicates': True
         }
         
         with pytest.raises(ValidationError) as exc_info:
@@ -274,6 +292,12 @@ class TestConfigManager:
             'save_metadata': True,
             'resume_downloads': False,
             'retry_attempts': 2,
+            'download_subtitles': True,
+            'subtitle_languages': ['en', 'es'],
+            'subtitle_format': 'vtt',
+            'auto_generated_subtitles': False,
+            'use_archive': False,
+            'skip_duplicates': False,
             'format_preferences': {
                 'video_codec': 'vp9',
                 'audio_codec': 'opus',
@@ -290,6 +314,12 @@ class TestConfigManager:
         assert config.format_preference == 'webm'
         assert config.split_timestamps is True
         assert config.max_parallel_downloads == 5
+        assert config.download_subtitles is True
+        assert config.subtitle_languages == ['en', 'es']
+        assert config.subtitle_format == 'vtt'
+        assert config.auto_generated_subtitles is False
+        assert config.use_archive is False
+        assert config.skip_duplicates is False
         assert config.format_preferences.video_codec == 'vp9'
         assert config.format_preferences.prefer_free_formats is True
     

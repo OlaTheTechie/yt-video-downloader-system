@@ -44,6 +44,8 @@ class ConfigManager:
             "subtitle_languages": ["en"],
             "subtitle_format": "srt",
             "auto_generated_subtitles": True,
+            "use_archive": True,
+            "skip_duplicates": True,
             "format_preferences": {
                 "video_codec": "h264",
                 "audio_codec": "aac",
@@ -187,7 +189,9 @@ class ConfigManager:
             'subtitles': 'download_subtitles',
             'subtitle_languages': 'subtitle_languages',
             'subtitle_format': 'subtitle_format',
-            'auto_subs': 'auto_generated_subtitles'
+            'auto_subs': 'auto_generated_subtitles',
+            'archive': 'use_archive',
+            'skip_duplicates': 'skip_duplicates'
         }
         
         # Apply CLI arguments
@@ -245,7 +249,8 @@ class ConfigManager:
             'output_directory', 'quality', 'format_preference', 'audio_format',
             'split_timestamps', 'max_parallel_downloads', 'save_thumbnails',
             'save_metadata', 'resume_downloads', 'retry_attempts', 'download_subtitles',
-            'subtitle_languages', 'subtitle_format', 'auto_generated_subtitles'
+            'subtitle_languages', 'subtitle_format', 'auto_generated_subtitles',
+            'use_archive', 'skip_duplicates'
         ]
         
         # Check required fields
@@ -316,6 +321,8 @@ class ConfigManager:
             subtitle_languages=config_dict['subtitle_languages'],
             subtitle_format=config_dict['subtitle_format'],
             auto_generated_subtitles=config_dict['auto_generated_subtitles'],
+            use_archive=config_dict['use_archive'],
+            skip_duplicates=config_dict['skip_duplicates'],
             format_preferences=format_preferences
         )
     
@@ -344,6 +351,8 @@ class ConfigManager:
             'subtitle_languages': config.subtitle_languages,
             'subtitle_format': config.subtitle_format,
             'auto_generated_subtitles': config.auto_generated_subtitles,
+            'use_archive': config.use_archive,
+            'skip_duplicates': config.skip_duplicates,
             'format_preferences': {
                 'video_codec': config.format_preferences.video_codec,
                 'audio_codec': config.format_preferences.audio_codec,

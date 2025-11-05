@@ -58,6 +58,8 @@ class DownloadConfig:
     subtitle_languages: List[str] = field(default_factory=lambda: ['en'])
     subtitle_format: str = "srt"
     auto_generated_subtitles: bool = True
+    use_archive: bool = True
+    skip_duplicates: bool = True
     
     def __post_init__(self):
         """Validate configuration values after initialization."""

@@ -1,0 +1,26 @@
+{
+  "output_directory": "./downloads",
+  "quality": "best",
+  "format_preference": "mp4",
+  "audio_format": "mp3",
+  "split_timestamps": false,
+  "max_parallel_downloads": 3,
+  "save_thumbnails": true,
+  "save_metadata": true,
+  "resume_downloads": true,
+  "retry_attempts": 3,
+  "download_subtitles": false,
+  "subtitle_languages": [
+    "en"
+  ],
+  "subtitle_format": "srt",
+  "auto_generated_subtitles": true,
+  "use_archive": true,
+  "skip_duplicates": true,
+  "format_preferences": {
+    "video_codec": "h264",
+    "audio_codec": "aac",
+    "container": "mp4",
+    "prefer_free_formats": false
+  }
+}

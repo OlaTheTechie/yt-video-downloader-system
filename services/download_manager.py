@@ -26,6 +26,7 @@ from services.interfaces import DownloadManagerInterface
 from services.timestamp_parser import TimestampParser
 from services.video_splitter import VideoSplitter
 from services.subtitle_handler import SubtitleHandler
+from services.archive_manager import ArchiveManager
 
 
 class TaskStatus(Enum):
@@ -554,6 +555,7 @@ class DownloadManager(DownloadManagerInterface):
         self._timestamp_parser = TimestampParser()
         self._video_splitter = VideoSplitter()
         self._subtitle_handler = SubtitleHandler()
+        self._archive_manager = ArchiveManager()
         
         # Thread pool and queue management
         self._executor: Optional[ThreadPoolExecutor] = None
@@ -700,6 +702,29 @@ class DownloadManager(DownloadManagerInterface):
             output_dir = Path(config.output_directory)
             output_dir.mkdir(parents=True, exist_ok=True)
             
+            # Initialize archive manager with output directory
+            if config.use_archive:
+                self._archive_manager = ArchiveManager(str(output_dir))
+            
+            # Extract basic info first to check for duplicates
+            ydl_opts_info = {'quiet': True, 'no_warnings': True}
+            with yt_dlp.YoutubeDL(ydl_opts_info) as ydl:
+                info = ydl.extract_info(url, download=False)
+                if not info:
+                    result.mark_failure("Failed to extract video information")
+                    return result
+                
+                video_id = info.get('id', '')
+                
+                # Check for duplicates if archive is enabled
+                if config.use_archive and config.skip_duplicates and video_id:
+                    if self._archive_manager.is_downloaded(video_id):
+                        existing_record = self._archive_manager.get_download_record(video_id)
+                        result.mark_failure(f"Video already downloaded: {existing_record.get('title', 'Unknown')}")
+                        result.status = DownloadStatus.SKIPPED
+                        print(f"Skipping duplicate video: {info.get('title', 'Unknown')}")
+                        return result
+            
             # Check for resume capability
             resume_state = None
             if config.resume_downloads:
@@ -763,12 +788,30 @@ class DownloadManager(DownloadManagerInterface):
                         )
                         result.thumbnail_path = thumbnail_path
                     
+                    # Download subtitles if requested
+                    if config.download_subtitles:
+                        try:
+                            subtitle_files = self._subtitle_handler.download_subtitles(
+                                url, str(output_dir), config, metadata
+                            )
+                            # Organize subtitles alongside video file
+                            organized_subtitles = self._subtitle_handler.organize_subtitles_with_video(
+                                video_path, subtitle_files
+                            )
+                            result.subtitle_files = organized_subtitles
+                        except Exception as e:
+                            print(f"Warning: Could not download subtitles: {e}")
+                    
                     # Handle timestamp splitting if requested
                     if config.split_timestamps:
                         split_files = self._handle_timestamp_splitting(
                             video_path, metadata, str(output_dir), safe_title
                         )
                         result.split_files = split_files
+                    
+                    # Add to archive if enabled
+                    if config.use_archive:
+                        self._archive_manager.add_download_record(metadata, result)
                 else:
                     result.mark_failure("Downloaded file not found")
                     self._progress_reporter.complete_download(url, False)
